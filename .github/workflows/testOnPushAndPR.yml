@@ -9,17 +9,13 @@ jobs:
     steps:
     - uses: devblackops/github-action-psscriptanalyzer@master
 
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-    - uses: actions/checkout@v1
-    - name: Install Pester
-      shell: pwsh
-      run: Install-Module Pester -Force
-    - name: Install Pester
-      shell: pwsh
-      run: Invoke-Pester test -EnableExit
+#  test:
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v1
+#    - name: Install Pester
+#      shell: pwsh
+#      run: Install-Module Pester -Force
+#    - name: Invoke Pester
+#      shell: pwsh
+#      run: Invoke-Pester test -EnableExit
