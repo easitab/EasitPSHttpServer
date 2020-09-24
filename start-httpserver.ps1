@@ -24,7 +24,7 @@
 #>
 [CmdletBinding()]
 Param(
-	[string]$BindingUrl = 'http://+',
+	[string]$BindingUrl = 'http://localhost',
 	[string]$Port = '9080',
 	[string]$Basedir = 'resources',
 	[string]$ErrorHandling = 'SilentlyContinue'
@@ -198,6 +198,7 @@ try {
 						$object = New-Object PSObject -Property $propertiesHash
 						$easitObjects += $object
 					}
+					# Ex: $execDir = D:\Easit\PSHttpServer\resources
 					$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
 					$executable = Join-Path -Path "$execDir" -ChildPath "$identifier.ps1"
 					if (Test-Path "$executable") {

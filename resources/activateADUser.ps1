@@ -1,6 +1,6 @@
 param(
-    $execDir,
-    $easitObjects
+    $execDir, # Ex: $execDir = D:\Easit\PSHttpServer\resources
+    $easitObjects # Object that hold all properties from the Easit object (Contact, Org, Status, Priority)
 )
 $now = Get-Date -UFormat "%Y-%m-%d %H:%M:%S"
 $logDir = Join-Path -Path "$execDir" -ChildPath 'logs'
@@ -10,8 +10,8 @@ $outputFile = Join-Path -Path "$logDir" -ChildPath "$scriptName.log"
 
 [int]$requestID =  $easitObjects.requestID
 
-$urlWS = ""
-$apikey = ""
+$urlWS = "http://yourEasitSystem/webservice/"
+$apikey = "API key for Easit Webservice"
 $importHandlerContact = "activateADUser"
 $importHandlerRequest = "updateRequest"
 
