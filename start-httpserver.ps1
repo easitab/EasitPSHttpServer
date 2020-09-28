@@ -166,52 +166,66 @@ try {
 				$htmlResponse = '<html><body>Sucess!</body></html>'
 				Write-CustomLog -Message "ContentType = $httpContentType" -Level INFO
 				if ($httpContentType -eq 'text/xml; charset=UTF-8') {
-					$match = $requestContent -match 'identifier">(.*)<\/'
-					$identifier = $Matches[1]
-					[xml]$requestContentXML = $requestContent
-					$items = $requestContentXML.EasitImport.Items.ChildNodes
-					$easitObjects = @()
-					foreach ($item in $items) {
-						$objectUID = $item.Attributes.Value
-						$propertiesHash = [ordered]@{
-							UID = $objectUID
-						}
-						$properties = $items.ChildNodes
-						foreach ($property in $properties.ChildNodes) {
-							$xmlPropertyName = $property.Attributes.Value
-							$xmlPropertyValue = $property.innerText
-							$keys = @($propertiesHash.keys)
-							foreach ($key in $keys) {
-								$keyMatch = $false
-								if ($key -eq $xmlPropertyName) {
-									$keyMatch = $true
-									[array]$currentPropertyValueArray = $propertiesHash[$key]
-									[array]$propertyValueArray = $currentPropertyValueArray
-									[array]$propertyValueArray += $xmlPropertyValue
-									$propertiesHash.Set_Item($xmlPropertyName, $propertyValueArray)
-								}
-							}
-							if (!($keyMatch)) {
-								$propertiesHash.Set_Item($xmlPropertyName, $xmlPropertyValue)
-							}
-						}
-						$object = New-Object PSObject -Property $propertiesHash
-						$easitObjects += $object
-					}
-					# Ex: $execDir = D:\Easit\PSHttpServer\resources
-					$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-					$executable = Join-Path -Path "$execDir" -ChildPath "$identifier.ps1"
-					if (Test-Path "$executable") {
-						try {
-							Write-CustomLog -Message "Creating job, executing $executable" -Level INFO
-							$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$easitObjects)
-							Write-CustomLog -Message "Job successfully created" -Level INFO
-						} catch {
-							Write-CustomLog -Message "$_" -Level ERROR
-							Write-CustomLog -Message "Error executing / running script!" -Level ERROR
+					$match = $requestContent -match 'itemIdentifier">(.*)<\/'
+					if ($null -eq $Matches) {
+						$match = $requestContent -match 'identifier">(.*)<\/'
+						if ($null -eq $Matches) {
+							Write-CustomLog -Message "No identifier found, unable to execute script" -Level INFO
+							$bailout = $true
 						}
 					} else {
-						Write-CustomLog -Message "Cannot find script ($PSScriptRoot\$Basedir\$identifier.ps1)!" -Level ERROR
+						Write-CustomLog -Message "Matches is not null" -Level INFO
+					}
+					$identifier = $Matches[1]
+					Write-CustomLog -Message "identifier = $identifier"
+					if (!($bailout)) {
+						[xml]$requestContentXML = $requestContent
+						$items = $requestContentXML.EasitImport.Items.ChildNodes
+						$easitObjects = @()
+						foreach ($item in $items) {
+							$objectUID = $item.Attributes.Value
+							$propertiesHash = [ordered]@{
+								UID = $objectUID
+							}
+							$properties = $items.ChildNodes
+							foreach ($property in $properties.ChildNodes) {
+								$xmlPropertyName = $property.Attributes.Value
+								$xmlPropertyValue = $property.innerText
+								$keys = @($propertiesHash.keys)
+								foreach ($key in $keys) {
+									$keyMatch = $false
+									if ($key -eq $xmlPropertyName) {
+										$keyMatch = $true
+										[array]$currentPropertyValueArray = $propertiesHash[$key]
+										[array]$propertyValueArray = $currentPropertyValueArray
+										[array]$propertyValueArray += $xmlPropertyValue
+										$propertiesHash.Set_Item($xmlPropertyName, $propertyValueArray)
+									}
+								}
+								if (!($keyMatch)) {
+									$propertiesHash.Set_Item($xmlPropertyName, $xmlPropertyValue)
+								}
+							}
+							$object = New-Object PSObject -Property $propertiesHash
+							$easitObjects += $object
+						}
+						# Ex: $execDir = D:\Easit\PSHttpServer\resources
+						$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
+						$executable = Join-Path -Path "$execDir" -ChildPath "$identifier.ps1"
+						if (Test-Path "$executable") {
+							try {
+								Write-CustomLog -Message "Creating job, executing $executable" -Level INFO
+								$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$easitObjects)
+								Write-CustomLog -Message "Job successfully created" -Level INFO
+							} catch {
+								Write-CustomLog -Message "$_" -Level ERROR
+								Write-CustomLog -Message "Error executing / running script!" -Level ERROR
+							}
+						} else {
+							Write-CustomLog -Message "Cannot find script ($PSScriptRoot\$Basedir\$identifier.ps1)!" -Level ERROR
+						}
+					} else {
+						Write-CustomLog -Message "Bailout is $false" -Level INFO
 					}
 					$jobCleanup = Get-Job -State Completed | Remove-Job
 				} else {
