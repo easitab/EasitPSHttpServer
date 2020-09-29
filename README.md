@@ -41,3 +41,6 @@ BINDING: http://+:9080/
 ## Support & Questions
 
 Questions and issue can be sent to [githubATeasit](mailto:github@easit.com)
+
+## Documentation
+[See wiki](https://github.com/easitab/EasitPSHttpServer/wiki)
