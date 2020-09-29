@@ -137,6 +137,7 @@ try {
 	Write-CustomLog -Message "Listening on $Binding" -Level INFO
 	while ($listener.IsListening) {
 		# analyze incoming request
+		$bailout = $false
 		$httpContext = $listener.GetContext()
 		$httpRequest = $httpContext.Request
 		$httpRequestMethod = $httpRequest.HttpMethod
@@ -158,7 +159,7 @@ try {
 		{
 			"POST /testfromeasit" {
 				$HttpResponse.StatusCode = 200
-				$htmlResponse = '<html><body>Sucess!</body></html>'
+				$htmlResponse = '<html><body>Success!</body></html>'
 			}
 			
 			"POST /fromeasit" { # execute script
@@ -247,21 +248,40 @@ try {
 						} else {
 							$identifierJSON = $Matches[2]
 						}
+					} else {
+						$match = $requestContent -match 'itemIdentifier">(.*)<\/'
+						if ($null -eq $Matches) {
+							$match = $requestContent -match 'identifier">(.*)<\/'
+							if ($null -eq $Matches) {
+								Write-CustomLog -Message "No identifier found, unable to execute script" -Level INFO
+								$bailout = $true
+							} else {
+								Write-CustomLog -Message "Matches is not null" -Level INFO
+								$identifierJSON = $Matches[1]
+							}
+						} else {
+							Write-CustomLog -Message "Matches is not null" -Level INFO
+							$identifierJSON = $Matches[1]
+						}
 					}
-					$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-					$executable = Join-Path -Path "$execDir" -ChildPath "$identifierJSON.ps1"
-					if (Test-Path "$executable") {
-						try {
-							Write-CustomLog -Message "Creating job, executable $executable" -Level INFO
-							$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-							$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$requestObjects)
-							Write-CustomLog -Message "Job successfully created" -Level INFO
-						} catch {
-							Write-CustomLog -Message "$_" -Level ERROR
-							Write-CustomLog -Message "Error executing / running script!" -Level ERROR
+					if (!($bailout)) {
+						$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
+						$executable = Join-Path -Path "$execDir" -ChildPath "$identifierJSON.ps1"
+						if (Test-Path "$executable") {
+							try {
+								Write-CustomLog -Message "Creating job, executable $executable" -Level INFO
+								$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
+								$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$requestObjects)
+								Write-CustomLog -Message "Job successfully created" -Level INFO
+							} catch {
+								Write-CustomLog -Message "$_" -Level ERROR
+								Write-CustomLog -Message "Error executing / running script!" -Level ERROR
+							}
+						} else {
+							Write-CustomLog -Message "Cannot find script ($executable)!" -Level ERROR
 						}
 					} else {
-						Write-CustomLog -Message "Cannot find script ($executable)!" -Level ERROR
+						Write-CustomLog -Message "Bailout is $false" -Level INFO
 					}
 					$jobCleanup = Get-Job -State Completed | Remove-Job
 				} else {
@@ -290,7 +310,7 @@ try {
 
 			}
 			default	{
-				$HttpResponse.StatusCode = 404
+				$HttpResponse.StatusCode = 204
 				$htmlResponse = 'Unknown endpoint or action!'
 				Write-CustomLog -Message "Received unknown endpoint or action! $received" -Level INFO
 				}
