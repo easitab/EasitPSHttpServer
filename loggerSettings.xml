@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+    <logname>PShttpServer</logname> <!--Name for logfile. If logname is PShttpServer logfile will be named PShttpServer_todaysdatewithdashes.log-->
+    <logFolderName>logs</logFolderName> <!--Folder to put logfiles in, relative to where start-httpserver.ps1 is located-->
+    <logRoot></logRoot> <!--Used if you want a custom location of logs, for example D:\logs. Otherwise leave epmty-->
+    <Level>INFO</Level> <!-- Default logging level for output with undefined logging level -->
+    <writeToHost></writeToHost> <!-- Used when running server in console. Leave empty if not needed, otherwise put in true -->
+    <ErrorHandling>SilentlyContinue</ErrorHandling> <!-- How to handle errors, more info at https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_preference_variables?view=powershell-5.1#erroractionpreference -->
+</settings>

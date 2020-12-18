@@ -24,63 +24,101 @@
 #>
 [CmdletBinding()]
 Param(
-	[string]$BindingUrl = 'http://localhost',
-	[string]$Port = '9080',
-	[string]$Basedir = 'resources',
-	[string]$ErrorHandling = 'SilentlyContinue'
+	[string]$ServerSettingsPath
 )
 
-	# Settings for logger
+# Settings for logger
 function Write-CustomLog {
 	[CmdletBinding()]
 	Param (
-		[Parameter(Mandatory=$true,
-				ValueFromPipelineByPropertyName=$true)]
-		[ValidateNotNullOrEmpty()]
-		[string]$Message,
+		[Parameter(ValueFromPipeline,ParameterSetName='string')]
+        [string]$Message,
 	
-		[Parameter(Mandatory=$false)]
-		[Alias('LogPath')]
-		[string]$Path = (Join-Path -Path "$($MyInvocation.PSScriptRoot)" -ChildPath "PShttpServer.log"),
+		[Parameter(ValueFromPipeline,ParameterSetName='object')]
+        [object]$InputObject,
+
+		[Parameter()]
+		[string]$today = (Get-Date -Format "yyyy-MM-dd"),
+
+		[Parameter()]
+        [ValidateSet('ERROR','WARN','INFO','VERBOSE','DEBUG')]
+		[string]$Level,
+
+		[Parameter()]
+        [string]$LogLevelSwitch = 'INFO',
 		
 		[Parameter(Mandatory=$false)]
-		[ValidateSet('ERROR','WARN','INFO','DEBUG','VERBOSE')]
-		[string]$Level = 'INFO',
-	
-		[Parameter(Mandatory=$false)]
-		[switch]$writeToHost,
-
-		[Parameter(Mandatory=$false)]
-		[string]$ErrorHandling = 'SilentlyContinue'
+		[string]$LoggerSettingsPath
 	)
-	$ErrorActionPreference = "$ErrorHandling"
 	# Format Date for our Log File
 	$FormattedDate = Get-Date -UFormat "%Y-%m-%d %H:%M:%S"
-
-	if (Test-Path $Path) {
-		$currentLogFile = Get-Item -Path $Path
-		$currentLogs = Get-ChildItem -Path "$($MyInvocation.PSScriptRoot)" -Include "*.log*"
-		[int]$currentLogsCount = $currentLogs.Count
-		if ($($currentLogFile.Length) -ge 10mb) {
-			$logNumber = $currentLogsCount + 1
-			if ($logNumber -ge 10) {
-				Remove-Item -Path "$($currentLogFile.BaseName).10"
-				$newLogNumber = 1
-				foreach ($file in $currentLogs) {
-					Rename-Item -Path $file -NewName "$($currentLogFile.BaseName).$logNumber"
-					$newLogNumber + 1
-				}
-			}
-			Rename-Item -Path $Path -NewName "$($currentLogFile.BaseName).$logNumber"
-		}
+	if (!($LoggerSettingsPath)) {
+		$loggerHome = "$($MyInvocation.PSScriptRoot)"
+		$logSetPath = Join-Path -Path "$loggerHome" -ChildPath 'loggerSettings.xml'
+	} else {
+		$logSetPath = "$LoggerSettingsPath"
 	}
-	if (!(Test-Path $Path)) {
-		$NewLogFile = New-Item "$Path" -Force -ItemType File
-		Write-Information "$FormattedDate - INFO - Created $NewLogFile"
+	if (Test-Path -Path "$logSetPath") {
+		try {
+			$loggerSettings = New-Object System.Xml.XmlDocument -ErrorAction Stop
+			$loggerSettings.Load($logSetPath)
+		} catch {
+			throw $_
+			exit
+		}
+	} else {
+		Write-Error "Unable to find logger settings"
+		exit
+	}
+	if ($InputObject -and $Level -eq 'ERROR') {
+        $Message = $InputObject.Exception
+    }
+    if ($InputObject -and $Level -ne 'ERROR') {
+        $Message = $InputObject.ToString()
+    }
+	if ($Level -match 'INFO') {
+		# Do nothing
+	} else {
+		$Level = "$($loggerSettings.settings.Level)"
+	}
+	$logFileName = "$($loggerSettings.settings.logname)"
+	$logname = "${logFileName}_${today}.log"
+	$logFolderName = "$($loggerSettings.settings.logFolderName)"
+	$logRoot = "$($loggerSettings.settings.logRoot)"
+	if ($logRoot) {
+		$logOutputPath = Join-Path -Path "$logRoot" -ChildPath "$logname"
+	} else {
+		$tempPath = Join-Path -Path "$loggerHome" -ChildPath "$logFolderName"
+		$logOutputPath = Join-Path -Path "$tempPath" -ChildPath "$logname"
+	}
+	$Level = "$($loggerSettings.settings.Level)"
+	$writeToHost = "$($loggerSettings.settings.writeToHost)"
+	$ErrorHandling = "$($loggerSettings.settings.ErrorHandling)"
+	$ErrorActionPreference = "$ErrorHandling"
+
+	if (Test-Path $logOutputPath) {
+		$logDir = Split-Path -Path $logOutputPath
+        $logArchiveFiles = Get-ChildItem -Path "$logDir\${logname}_*.log" -Force
+        foreach ($logArchiveFile in $logArchiveFiles) {
+            if ($logArchiveFile.CreationTime -lt ((Get-Date).AddDays(-30))) {
+                "$($logArchiveFile.Name) is older than 30 days, removing.." | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+				try {
+					Remove-Item "$($logArchiveFile.FullName)" -Force
+				} catch {
+					Write-Error $_
+					exit
+				}
+                "Removed $($logArchiveFile.Name)" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+            }
+        }
+    }
+	if (!(Test-Path $logOutputPath)) {
+		$NewLogFile = New-Item "$logOutputPath" -Force -ItemType File
+		"$FormattedDate - INFO - Created $NewLogFile" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
 	}
 	
 	# Write message to error, warning, or verbose pipeline
-	switch ($Level) { 
+    switch ($Level) { 
 		'ERROR' { 
 			Write-Error $Message 
 		}
@@ -99,7 +137,7 @@ function Write-CustomLog {
 	}
 	
 	# Write log entry to $Path
-	"$FormattedDate - $Level - $Message" | Out-File -FilePath "$Path" -Encoding UTF8 -Append -NoClobber
+	"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
 	if ($writeToHost) {
 		Write-Host "$FormattedDate - $Level - $Message"
 	}
@@ -110,6 +148,31 @@ if (-not [System.Net.HttpListener]::IsSupported) {
 	Write-CustomLog -Message "HttpListener is not supported for this OS!" -Level ERROR
 	exit
 }
+if (!($ServerSettingsPath)) {
+	$serverHome = Split-Path -Path "$($MyInvocation.MyCommand.Path)" -Parent
+	$Path = Join-Path -Path "$serverHome" -ChildPath 'serverSettings.xml'
+} else {
+	$Path = "$ServerSettingsPath"
+}
+
+if (Test-Path -Path "$Path") {
+	try {
+		$serverSettings = New-Object System.Xml.XmlDocument -ErrorAction Stop
+		$tempServerSettings = New-Object System.Xml.XmlDocument -ErrorAction Stop
+		$serverSettings.Load($Path)
+	} catch {
+		Write-CustomLog -Message "Unable to load server settings" -Level ERROR
+		exit
+	}
+} else {
+	Write-CustomLog -Message "Unable to find server settings" -Level ERROR
+	exit
+}
+
+$BindingUrl = "$($serverSettings.settings.BindingUrl)"
+$Port = "$($serverSettings.settings.Port)"
+$Basedir = "$($serverSettings.settings.Basedir)"
+$ErrorHandling = "$($serverSettings.settings.ErrorHandling)"
 
 $Binding = "$BindingUrl"+':'+"$Port/"
 
@@ -120,13 +183,13 @@ try {
 	$listener.Prefixes.Add($Binding)
 	$listener.Start()
 } catch {
-	Write-CustomLog -Message "Unable to start server" -Level INFO
+	Write-CustomLog -Message "Unable to start server" -Level ERROR
 	Write-CustomLog -Message "$_" -Level ERROR
 	exit
 }
 $error.Clear()
 try {
-	$resourceRoot = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
+	$resourceRoot = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
 	if (!(Test-Path $resourceRoot)) {
 		Write-CustomLog -Message "No valid resource folder ($resourceRoot) provided!" -Level ERROR
 		exit
@@ -137,14 +200,13 @@ try {
 	Write-CustomLog -Message "Listening on $Binding" -Level INFO
 	while ($listener.IsListening) {
 		# analyze incoming request
-		$bailout = $false
 		$httpContext = $listener.GetContext()
 		$httpRequest = $httpContext.Request
 		$httpRequestMethod = $httpRequest.HttpMethod
 		$httpRequestURLPath = $httpRequest.Url.LocalPath
 		$received = "$httpRequestMethod $httpRequestURLPath"
+		Write-CustomLog -Message "received = $received" -Level VERBOSE
 		$requestUrl = $httpRequest.Url.OriginalString
-		Write-CustomLog -Message "requestUrl = $requestUrl" -Level INFO
 		$httpContentType = $httpRequest.ContentType
 		if ($HttpRequest.HasEntityBody) {
 			$Reader = New-Object System.IO.StreamReader($HttpRequest.InputStream)
@@ -152,89 +214,84 @@ try {
 		}
 		$HttpResponse = $HttpContext.Response
 		$HttpResponse.Headers.Add("Content-Type","text/plain")
-		
-		
+		$responseSent = $false
 		# check for known commands
 		switch ($received)
-		{
-			"POST /testfromeasit" {
-				$HttpResponse.StatusCode = 200
-				$htmlResponse = '<html><body>Success!</body></html>'
-			}
-			
+		{			
 			"POST /fromeasit" { # execute script
+				$tempServerSettings.Load($Path)
 				$HttpResponse.StatusCode = 200
 				$htmlResponse = '<html><body>Sucess!</body></html>'
-				Write-CustomLog -Message "ContentType = $httpContentType" -Level INFO
+				$buffer = [System.Text.Encoding]::UTF8.GetBytes($htmlResponse)
+				$HttpResponse.ContentLength64 = $buffer.Length
+				$HttpResponse.OutputStream.Write($buffer, 0, $buffer.Length)
+				$HttpResponse.Close()
+				$responseOutputSetting = "$($tempServerSettings.settings.ResponseOutput)"
+				if ("$responseOutputSetting" -match '^t.+') {
+					Write-CustomLog -Message "$HttpResponse" -Level INFO
+				}
+				$responseSent = $true
+				Write-CustomLog -Message "ContentType = $httpContentType"
+				$requestOutputSetting = "$($tempServerSettings.settings.RequestOutput)"
+				if ("$requestOutputSetting" -match '^t.+') {
+					Write-CustomLog -Message "$requestContent" -Level INFO
+				}
 				if ($httpContentType -eq 'text/xml; charset=UTF-8') {
-					$match = $requestContent -match 'itemIdentifier">(.*)<\/'
-					if ($null -eq $Matches) {
-						$match = $requestContent -match 'identifier">(.*)<\/'
-						if ($null -eq $Matches) {
-							Write-CustomLog -Message "No identifier found, unable to execute script" -Level INFO
-							$bailout = $true
-						}
-					} else {
-						Write-CustomLog -Message "Matches is not null" -Level INFO
-					}
+					$match = $requestContent -match 'identifier">(.*)<\/'
 					$identifier = $Matches[1]
-					Write-CustomLog -Message "identifier = $identifier"
-					if (!($bailout)) {
-						[xml]$requestContentXML = $requestContent
-						$items = $requestContentXML.EasitImport.Items.ChildNodes
-						$easitObjects = @()
-						foreach ($item in $items) {
-							$objectUID = $item.Attributes.Value
-							$propertiesHash = [ordered]@{
-								UID = $objectUID
-							}
-							$properties = $items.ChildNodes
-							foreach ($property in $properties.ChildNodes) {
-								$xmlPropertyName = $property.Attributes.Value
-								$xmlPropertyValue = $property.innerText
-								$keys = @($propertiesHash.keys)
-								foreach ($key in $keys) {
-									$keyMatch = $false
-									if ($key -eq $xmlPropertyName) {
-										$keyMatch = $true
-										[array]$currentPropertyValueArray = $propertiesHash[$key]
-										[array]$propertyValueArray = $currentPropertyValueArray
-										[array]$propertyValueArray += $xmlPropertyValue
-										$propertiesHash.Set_Item($xmlPropertyName, $propertyValueArray)
-									}
-								}
-								if (!($keyMatch)) {
-									$propertiesHash.Set_Item($xmlPropertyName, $xmlPropertyValue)
-								}
-							}
-							$object = New-Object PSObject -Property $propertiesHash
-							$easitObjects += $object
+					[xml]$requestContentXML = $requestContent
+					$items = $requestContentXML.EasitImport.Items.ChildNodes
+					$easitObjects = @()
+					foreach ($item in $items) {
+						$objectUID = $item.Attributes.Value
+						$propertiesHash = [ordered]@{
+							UID = $objectUID
 						}
-						# Ex: $execDir = D:\Easit\PSHttpServer\resources
-						$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-						$executable = Join-Path -Path "$execDir" -ChildPath "$identifier.ps1"
-						if (Test-Path "$executable") {
-							try {
-								Write-CustomLog -Message "Creating job, executing $executable" -Level INFO
-								$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$easitObjects)
-								Write-CustomLog -Message "Job successfully created" -Level INFO
-							} catch {
-								Write-CustomLog -Message "$_" -Level ERROR
-								Write-CustomLog -Message "Error executing / running script!" -Level ERROR
+						$properties = $items.ChildNodes
+						foreach ($property in $properties.ChildNodes) {
+							$xmlPropertyName = $property.Attributes.Value
+							$xmlPropertyValue = $property.innerText
+							$keys = @($propertiesHash.keys)
+							foreach ($key in $keys) {
+								$keyMatch = $false
+								if ($key -eq $xmlPropertyName) {
+									$keyMatch = $true
+									[array]$currentPropertyValueArray = $propertiesHash[$key]
+									[array]$propertyValueArray = $currentPropertyValueArray
+									[array]$propertyValueArray += $xmlPropertyValue
+									$propertiesHash.Set_Item($xmlPropertyName, $propertyValueArray)
+								}
 							}
-						} else {
-							Write-CustomLog -Message "Cannot find script ($PSScriptRoot\$Basedir\$identifier.ps1)!" -Level ERROR
+							if (!($keyMatch)) {
+								$propertiesHash.Set_Item($xmlPropertyName, $xmlPropertyValue)
+							}
+						}
+						$object = New-Object PSObject -Property $propertiesHash
+						$easitObjects += $object
+					}
+					# Ex: $execDir = D:\Easit\PSHttpServer\resources
+					$execDir = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
+					$executable = Join-Path -Path "$execDir" -ChildPath "$identifier.ps1"
+					if (Test-Path "$executable") {
+						try {
+							Write-CustomLog -Message "Creating job, executing $executable with identifier $identifier" -Level INFO
+							Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$easitObjects) -ErrorAction Stop
+							Write-CustomLog -Message "Job successfully created" -Level INFO
+						} catch {
+							Write-CustomLog -Message "$_" -Level ERROR
+							Write-CustomLog -Message "Error executing / running script!" -Level ERROR
 						}
 					} else {
-						Write-CustomLog -Message "Bailout is $false" -Level INFO
+						Write-CustomLog -Message "Cannot find executable ($executable)!" -Level ERROR
 					}
 					$jobCleanup = Get-Job -State Completed | Remove-Job
 				} else {
-					Write-CustomLog -Message "Invalid Content-Type!" -INFO
+					Write-CustomLog -Message "Invalid Content-Type!" -Level INFO
 				}
 			}
 
 			"POST /toeasit" {
+				$tempServerSettings.Load($Path)
 				$HttpResponse.StatusCode = 200
 				$htmlResponse = '<html><body>Sucess!</body></html>'
 				Write-CustomLog -Message "ContentType = $httpContentType" -Level INFO
@@ -248,40 +305,21 @@ try {
 						} else {
 							$identifierJSON = $Matches[2]
 						}
-					} else {
-						$match = $requestContent -match 'itemIdentifier">(.*)<\/'
-						if ($null -eq $Matches) {
-							$match = $requestContent -match 'identifier">(.*)<\/'
-							if ($null -eq $Matches) {
-								Write-CustomLog -Message "No identifier found, unable to execute script" -Level INFO
-								$bailout = $true
-							} else {
-								Write-CustomLog -Message "Matches is not null" -Level INFO
-								$identifierJSON = $Matches[1]
-							}
-						} else {
-							Write-CustomLog -Message "Matches is not null" -Level INFO
-							$identifierJSON = $Matches[1]
-						}
 					}
-					if (!($bailout)) {
-						$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-						$executable = Join-Path -Path "$execDir" -ChildPath "$identifierJSON.ps1"
-						if (Test-Path "$executable") {
-							try {
-								Write-CustomLog -Message "Creating job, executable $executable" -Level INFO
-								$execDir = Join-Path -Path "$PSScriptRoot" -ChildPath "$Basedir"
-								$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$requestObjects)
-								Write-CustomLog -Message "Job successfully created" -Level INFO
-							} catch {
-								Write-CustomLog -Message "$_" -Level ERROR
-								Write-CustomLog -Message "Error executing / running script!" -Level ERROR
-							}
-						} else {
-							Write-CustomLog -Message "Cannot find script ($executable)!" -Level ERROR
+					$execDir = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
+					$executable = Join-Path -Path "$execDir" -ChildPath "$identifierJSON.ps1"
+					if (Test-Path "$executable") {
+						try {
+							Write-CustomLog -Message "Creating job, executable $executable" -Level INFO 
+							$execDir = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
+							$job = Start-Job -Name "$identifier" -FilePath "$executable" -ArgumentList @($execDir,$requestObjects)
+							Write-CustomLog -Message "Job successfully created" -Level INFO
+						} catch {
+							Write-CustomLog -Message "$_" -Level ERROR
+							Write-CustomLog -Message "Error executing / running script!" -Level ERROR
 						}
 					} else {
-						Write-CustomLog -Message "Bailout is $false" -Level INFO
+						Write-CustomLog -Message "Cannot find script ($executable)!" -Level ERROR
 					}
 					$jobCleanup = Get-Job -State Completed | Remove-Job
 				} else {
@@ -310,15 +348,18 @@ try {
 
 			}
 			default	{
-				$HttpResponse.StatusCode = 204
+				$HttpResponse.StatusCode = 404
 				$htmlResponse = 'Unknown endpoint or action!'
-				Write-CustomLog -Message "Received unknown endpoint or action! $received" -Level INFO
+				Write-CustomLog -Message "Received unknown endpoint or action! $received"  -Level INFO
 				}
 			}
-		$buffer = [System.Text.Encoding]::UTF8.GetBytes($htmlResponse)
-		$HttpResponse.ContentLength64 = $buffer.Length
-		$HttpResponse.OutputStream.Write($buffer, 0, $buffer.Length)
-		$HttpResponse.Close()
+		if (!($responseSent)) {
+			$buffer = [System.Text.Encoding]::UTF8.GetBytes($htmlResponse)
+			$HttpResponse.ContentLength64 = $buffer.Length
+			$HttpResponse.OutputStream.Write($buffer, 0, $buffer.Length)
+			# $HttpResponse | Out-File "C:\Easit\PSHttpServer\logs\response.txt"
+			$HttpResponse.Close()
+		}
 	}
 } catch {
 	$fullExceptionMessage = "$($_.Exception.InnerException)"
@@ -339,9 +380,9 @@ try {
 } finally {
 	$jobCleanup = Get-Job -State Completed | Remove-Job
 	if ($jobCleanup) {
-		Write-CustomLog -Message "Removed completed jobs" -Level INFO
+		Write-CustomLog -Message "Removed completed jobs" -Level VERBOSE
 	} else {
-		Write-CustomLog -Message "No completed jobs to remove" -Level INFO
+		Write-CustomLog -Message "No completed jobs to remove" -Level VERBOSE
 	}
 	# Stop powershell webserver
 	$listener.Stop()

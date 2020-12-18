@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+    <BindingUrl>http://localhost</BindingUrl>
+    <Port>9080</Port>
+    <Basedir>resources</Basedir>
+    <ErrorHandling>SilentlyContinue</ErrorHandling>
+    <RequestOutput>false</RequestOutput>
+    <ResponseOutput>false</ResponseOutput>
+</settings>

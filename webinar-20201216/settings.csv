@@ -1,0 +1,2 @@
+url;apikey;adServer;adUsername;adPassword;SearchBase
+http://localhost/webservice/;apikey;adServer;adUsername;adPassword;OU=users,OU=company,DC=webinar,DC=internal
