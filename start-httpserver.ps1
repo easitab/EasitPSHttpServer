@@ -7,7 +7,7 @@
 	specified as identifier and if present in subfolder 'resources'.
 
 .NOTES
-	Copyright 2019 Easit AB
+	Copyright 2021 Easit AB
 
 	Licensed under the Apache License, Version 2.0 (the "License");
 	you may not use this file except in compliance with the License.
@@ -33,72 +33,91 @@ function Write-CustomLog {
 	Param (
 		[Parameter(ValueFromPipeline,ParameterSetName='string')]
         [string]$Message,
-	
 		[Parameter(ValueFromPipeline,ParameterSetName='object')]
         [object]$InputObject,
-
-		[Parameter()]
-		[string]$today = (Get-Date -Format "yyyy-MM-dd"),
-
 		[Parameter()]
         [ValidateSet('ERROR','WARN','INFO','VERBOSE','DEBUG')]
-		[string]$Level,
-
+		[string]$Level = 'INFO',
 		[Parameter()]
-        [string]$LogLevelSwitch = 'INFO',
-		
-		[Parameter(Mandatory=$false)]
-		[string]$LoggerSettingsPath
+		[string]$LogName,
+		[Parameter()]
+		[string]$LogDirectory,
+		[Parameter()]
+		[int]$RotationInterval,
+		[Parameter()]
+		[string]$LogLevelSwitch,
+		[Parameter()]
+		[string]$ErrorHandling
 	)
-	# Format Date for our Log File
-	$FormattedDate = Get-Date -UFormat "%Y-%m-%d %H:%M:%S"
-	if (!($LoggerSettingsPath)) {
-		$loggerHome = "$($MyInvocation.PSScriptRoot)"
-		$logSetPath = Join-Path -Path "$loggerHome" -ChildPath 'loggerSettings.xml'
-	} else {
-		$logSetPath = "$LoggerSettingsPath"
-	}
+	$loggerHome = "$($MyInvocation.PSScriptRoot)"
+	$logSetPath = Join-Path -Path "$loggerHome" -ChildPath 'loggerSettings.xml'
 	if (Test-Path -Path "$logSetPath") {
 		try {
 			$loggerSettings = New-Object System.Xml.XmlDocument -ErrorAction Stop
 			$loggerSettings.Load($logSetPath)
 		} catch {
 			throw $_
-			exit
 		}
 	} else {
-		Write-Error "Unable to find logger settings"
-		exit
+		Write-Verbose "Unable to find logger settings, using default settings"
 	}
+	if ([string]::IsNullOrWhiteSpace($LogName)) {
+		$LogName = "$($loggerSettings.settings.LogName)"
+		if ([string]::IsNullOrWhiteSpace($LogName)) {
+			$LogName = 'PShttpServer'
+		}
+	}
+	if ([string]::IsNullOrWhiteSpace($Level)) {
+		$Level = 'INFO'
+	}
+	if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
+		$LogDirectory = "$($loggerSettings.settings.LogDirectory)"
+		if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
+			$LogDirectory = 'logs'
+		}
+	}
+	if ([string]::IsNullOrWhiteSpace($RotationInterval)) {
+		$RotationInterval = "$($loggerSettings.settings.RotationInterval)"
+		if ([string]::IsNullOrWhiteSpace($RotationInterval)) {
+			$RotationInterval = 30
+		}
+	}
+	if ([string]::IsNullOrWhiteSpace($LogLevelSwitch)) {
+		$LogLevelSwitch = "$($loggerSettings.settings.LogLevelSwitch)"
+		if ([string]::IsNullOrWhiteSpace($LogLevelSwitch)) {
+			$LogLevelSwitch = 'INFO'
+		}
+	}
+	if ([string]::IsNullOrWhiteSpace($ErrorHandling)) {
+		$ErrorHandling = "$($loggerSettings.settings.ErrorHandling)"
+		if ([string]::IsNullOrWhiteSpace($ErrorHandling)) {
+			$ErrorHandling = 'SilentlyContinue'
+		}
+	}
+	$FormattedDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+	$today = Get-Date -Format "yyyyMMdd"
+	$LogName = "${LogName}_${today}.log"
+	$LogRootDirectory = Join-Path -Path "$loggerHome" -ChildPath "$LogDirectory"
+	$logOutputPath = Join-Path -Path "$LogRootDirectory" -ChildPath "$LogName"
+
+	$writeToHost = "$($loggerSettings.settings.writeToHost)"
+	if ([string]::IsNullOrWhiteSpace($writeToHost)) {
+		$writeToHost = 'false'
+	}
+	$ErrorActionPreference = "$ErrorHandling"
+	if ([string]::IsNullOrWhiteSpace($ErrorActionPreference)) {
+		$ErrorActionPreference = 'SilentlyContinue'
+	}
+	
 	if ($InputObject -and $Level -eq 'ERROR') {
         $Message = $InputObject.Exception
     }
     if ($InputObject -and $Level -ne 'ERROR') {
         $Message = $InputObject.ToString()
     }
-	if ($Level -match 'INFO') {
-		# Do nothing
-	} else {
-		$Level = "$($loggerSettings.settings.Level)"
-	}
-	$logFileName = "$($loggerSettings.settings.logname)"
-	$logname = "${logFileName}_${today}.log"
-	$logFolderName = "$($loggerSettings.settings.logFolderName)"
-	$logRoot = "$($loggerSettings.settings.logRoot)"
-	if ($logRoot) {
-		$logOutputPath = Join-Path -Path "$logRoot" -ChildPath "$logname"
-	} else {
-		$tempPath = Join-Path -Path "$loggerHome" -ChildPath "$logFolderName"
-		$logOutputPath = Join-Path -Path "$tempPath" -ChildPath "$logname"
-	}
-	$Level = "$($loggerSettings.settings.Level)"
-	$writeToHost = "$($loggerSettings.settings.writeToHost)"
-	$ErrorHandling = "$($loggerSettings.settings.ErrorHandling)"
-	$ErrorActionPreference = "$ErrorHandling"
 
 	if (Test-Path $logOutputPath) {
-		$logDir = Split-Path -Path $logOutputPath
-        $logArchiveFiles = Get-ChildItem -Path "$logDir\${logname}_*.log" -Force
+        $logArchiveFiles = Get-ChildItem -Path "$LogRootDirectory\${logname}_*.log" -Force
         foreach ($logArchiveFile in $logArchiveFiles) {
             if ($logArchiveFile.CreationTime -lt ((Get-Date).AddDays(-30))) {
                 "$($logArchiveFile.Name) is older than 30 days, removing.." | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
@@ -108,7 +127,7 @@ function Write-CustomLog {
 					Write-Error $_
 					exit
 				}
-                "Removed $($logArchiveFile.Name)" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+                "$FormattedDate - INFO - Removed $($logArchiveFile.Name)" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
             }
         }
     }
@@ -118,41 +137,60 @@ function Write-CustomLog {
 	}
 	
 	# Write message to error, warning, or verbose pipeline
-    switch ($Level) { 
-		'ERROR' { 
-			Write-Error $Message 
+    if ($Level -eq 'ERROR') {
+		Write-Error "$Message" -ErrorAction Continue
+		"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+		if ($InputObject) {
+			$InputObject | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
 		}
-		'WARN' { 
-			Write-Warning $Message 
+	} elseif ($Level -eq 'WARN') {
+		Write-Warning "$Message" -WarningAction Continue
+		"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+		if ($InputObject) {
+			$InputObject | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
 		}
-		'INFO' {
-			Write-Information $Message
+	} elseif ($Level -eq 'INFO') {
+		Write-Information "$Message" -InformationAction Continue
+		"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+		if ($InputObject) {
+			$InputObject | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
 		}
-		'VERBOSE' { 
-			Write-Verbose $Message 
+	} elseif ($Level -eq 'VERBOSE') {
+		if ($LogLevelSwitch -eq 'VERBOSE' -or $LogLevelSwitch -eq 'DEBUG') {
+			$VerbosePreference = 'Continue'
+			Write-Verbose $Message
+			"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+			if ($InputObject) {
+				$InputObject | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+			}
 		}
-		'DEBUG' { 
+		$VerbosePreference = $null
+	} elseif ($Level -eq 'DEBUG' -and $LogLevelSwitch -eq 'DEBUG') {
+		if ($LogLevelSwitch -eq 'VERBOSE' -or $LogLevelSwitch -eq 'DEBUG') {
+			$DebugPreference = 'Continue'
 			Write-Debug $Message
+			"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+			if ($InputObject) {
+				$InputObject | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
+			}
 		}
+		$DebugPreference = $null
+	} else {
+		## Nothin to do
 	}
-	
-	# Write log entry to $Path
-	"$FormattedDate - $Level - $Message" | Out-File -FilePath "$logOutputPath" -Encoding UTF8 -Append -NoClobber
-	if ($writeToHost) {
+	if ($writeToHost -eq 'true') {
 		Write-Host "$FormattedDate - $Level - $Message"
 	}
 }
 # End of settings for logger
-
-if (-not [System.Net.HttpListener]::IsSupported) {
-	Write-CustomLog -Message "HttpListener is not supported for this OS!" -Level ERROR
-	exit
-}
 if (!($ServerSettingsPath)) {
 	$serverHome = Split-Path -Path "$($MyInvocation.MyCommand.Path)" -Parent
 	$Path = Join-Path -Path "$serverHome" -ChildPath 'serverSettings.xml'
 } else {
 	$Path = "$ServerSettingsPath"
+}
+if (-not [System.Net.HttpListener]::IsSupported) {
+	throw "Error: HttpListener is not supported for this OS!"
 }
 
 if (Test-Path -Path "$Path") {
@@ -161,21 +199,49 @@ if (Test-Path -Path "$Path") {
 		$tempServerSettings = New-Object System.Xml.XmlDocument -ErrorAction Stop
 		$serverSettings.Load($Path)
 	} catch {
-		Write-CustomLog -Message "Unable to load server settings" -Level ERROR
-		exit
+		Write-CustomLog -Message "Error: Unable to load server settings" -Level ERROR
+		Write-CustomLog -InputObject $_ -Level ERROR
+		break
 	}
-} else {
-	Write-CustomLog -Message "Unable to find server settings" -Level ERROR
-	exit
 }
-
+if (!(Test-Path -Path "$Path")) {
+	Write-CustomLog -Message "Error: Unable to find server settings" -Level ERROR
+	
+}
 $BindingUrl = "$($serverSettings.settings.BindingUrl)"
+if ([string]::IsNullOrWhiteSpace($BindingUrl)) {
+	Write-CustomLog -Message "BindingUrl is null or whitespace " -Level ERROR
+	break
+}
 $Port = "$($serverSettings.settings.Port)"
+if ([string]::IsNullOrWhiteSpace($Port)) {
+	Write-CustomLog -Message "Port is null or whitespace " -Level ERROR
+	break
+}
 $Basedir = "$($serverSettings.settings.Basedir)"
+if ([string]::IsNullOrWhiteSpace($Basedir)) {
+	Write-CustomLog -Message "Basedir is null or whitespace " -Level ERROR
+	break
+}
 $ErrorHandling = "$($serverSettings.settings.ErrorHandling)"
+if ([string]::IsNullOrWhiteSpace($ErrorHandling)) {
+	Write-CustomLog -Message "ErrorHandling is null or whitespace " -Level ERROR
+	break
+}
 
 $Binding = "$BindingUrl"+':'+"$Port/"
 
+$uri = $Binding -as [System.URI]
+if (!($null -ne $uri.AbsoluteURI -and $uri.Scheme -match 'http|https')) {
+	Write-CustomLog -Message "URL to server failed uri test" -Level ERROR
+	break
+}
+
+$resourceRoot = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
+if (!(Test-Path $resourceRoot)) {
+	Write-CustomLog -Message "No valid resource folder ($resourceRoot) provided!" -Level ERROR
+	break
+}
 # Starting the powershell webserver
 Write-CustomLog -Message "Starting powershell http server..." -Level INFO
 try {
@@ -189,15 +255,9 @@ try {
 }
 $error.Clear()
 try {
-	$resourceRoot = Join-Path -Path "$serverHome" -ChildPath "$Basedir"
-	if (!(Test-Path $resourceRoot)) {
-		Write-CustomLog -Message "No valid resource folder ($resourceRoot) provided!" -Level ERROR
-		exit
-	} else {
-		Write-CustomLog -Message "Looking for resources at $resourceRoot" -Level INFO
-	}
 	Write-CustomLog -Message "Powershell http server started." -Level INFO
 	Write-CustomLog -Message "Listening on $Binding" -Level INFO
+	Write-CustomLog -Message "Looking for resources at $resourceRoot" -Level INFO
 	while ($listener.IsListening) {
 		# analyze incoming request
 		$httpContext = $listener.GetContext()
@@ -227,13 +287,13 @@ try {
 				$HttpResponse.OutputStream.Write($buffer, 0, $buffer.Length)
 				$HttpResponse.Close()
 				$responseOutputSetting = "$($tempServerSettings.settings.ResponseOutput)"
-				if ("$responseOutputSetting" -match '^t.+') {
+				if ($responseOutputSetting -eq 'true') {
 					Write-CustomLog -Message "$HttpResponse" -Level INFO
 				}
 				$responseSent = $true
-				Write-CustomLog -Message "ContentType = $httpContentType"
+				Write-CustomLog -Message "ContentType = $httpContentType" -Level VERBOSE
 				$requestOutputSetting = "$($tempServerSettings.settings.RequestOutput)"
-				if ("$requestOutputSetting" -match '^t.+') {
+				if ($requestOutputSetting -eq 'true') {
 					Write-CustomLog -Message "$requestContent" -Level INFO
 				}
 				if ($httpContentType -eq 'text/xml; charset=UTF-8') {
@@ -282,7 +342,7 @@ try {
 							Write-CustomLog -Message "Error executing / running script!" -Level ERROR
 						}
 					} else {
-						Write-CustomLog -Message "Cannot find executable ($executable)!" -Level ERROR
+						Write-CustomLog -Message "Cannot find script ($executable)!" -Level ERROR
 					}
 					$jobCleanup = Get-Job -State Completed | Remove-Job
 				} else {
@@ -346,6 +406,9 @@ try {
 				Write-CustomLog -Message "Everything is goooooood!!!" -Level INFO
 				$htmlResponse = 'Staus: OK!'
 
+			}
+			"GET /favicon.ico" {
+				# Block to stop polution of log with 'Received unknown endpoint or action! GET /favicon.ico'
 			}
 			default	{
 				$HttpResponse.StatusCode = 404
