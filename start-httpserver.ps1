@@ -183,8 +183,8 @@ function Write-CustomLog {
 	}
 }
 # End of settings for logger
+$serverHome = Split-Path -Path "$($MyInvocation.MyCommand.Path)" -Parent
 if (!($ServerSettingsPath)) {
-	$serverHome = Split-Path -Path "$($MyInvocation.MyCommand.Path)" -Parent
 	$Path = Join-Path -Path "$serverHome" -ChildPath 'serverSettings.xml'
 } else {
 	$Path = "$ServerSettingsPath"
